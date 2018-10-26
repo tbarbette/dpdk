@@ -460,11 +460,57 @@ mlx5_rx_descriptor_status(void *rx_queue, uint16_t offset)
 		used += n;
 		cqe = &(*rxq->cqes)[cq_ci & cqe_cnt];
 	}
-	used = RTE_MIN(used, (1U << rxq->elts_n) - 1);
+	used = rte_min(used, (1u << rxq->elts_n) - 1);
 	if (offset < used)
-		return RTE_ETH_RX_DESC_DONE;
-	return RTE_ETH_RX_DESC_AVAIL;
+		return rte_eth_rx_desc_done;
+	return rte_eth_rx_desc_avail;
 }
+
+int
+mlx5_rx_queue_count(struct rte_eth_dev *dev, uint16_t rx_queue_id);
+{
+	struct priv *priv = dev->data->dev_private;
+	struct mlx5_rxq_data *rxq;
+
+	rxq = (*priv->rxqs)[rx_queue_id];
+	if (!rxq) {
+		rte_errno = EINVAL;
+		return -rte_errno;
+	}
+
+	struct rxq_zip *zip = &rxq->zip;
+	volatile struct mlx5_cqe *cqe;
+	const unsigned int cqe_n = (1 << rxq->cqe_n);
+	const unsigned int cqe_cnt = cqe_n - 1;
+	unsigned int cq_ci;
+	unsigned int used;
+
+	/* if we are processing a compressed cqe */
+	if (zip->ai) {
+		used = zip->cqe_cnt - zip->ca;
+		cq_ci = zip->cq_ci;
+	} else {
+		used = 0;
+		cq_ci = rxq->cq_ci;
+	}
+	cqe = &(*rxq->cqes)[cq_ci & cqe_cnt];
+	while (check_cqe(cqe, cqe_n, cq_ci) == 0) {
+		int8_t op_own;
+		unsigned int n;
+
+		op_own = cqe->op_own;
+		if (MLX5_CQE_FORMAT(op_own) == MLX5_COMPRESSED)
+			n = rte_be_to_cpu_32(cqe->byte_cnt);
+		else
+			n = 1;
+		cq_ci += n;
+		used += n;
+		cqe = &(*rxq->cqes)[cq_ci & cqe_cnt];
+	}
+	used = rte_min(used, (1u << rxq->elts_n) - 1);
+    return used;
+}
+
 
 /**
  * DPDK callback for TX.

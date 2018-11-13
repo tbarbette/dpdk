@@ -119,6 +119,23 @@ static const struct mlx5_counter_ctrl mlx5_counters_init[] = {
 
 static const unsigned int xstats_n = RTE_DIM(mlx5_counters_init);
 
+static inline void
+mlx5_read_ib_stat(int idx, uint64_t *stat) {
+    FILE *file;
+    MKSTR(path, "%s/ports/1/hw_counters/%s",
+          priv->ibdev_path,
+          mlx5_counters_init[idx].ctr_name);
+
+    file = fopen(path, "rb");
+    if (file) {
+        int n = fscanf(file, "%" SCNu64, stat);
+
+        fclose(file);
+        if (n != 1)
+            stat = 0;
+    }
+}
+
 /**
  * Read device counters table.
  *
@@ -155,19 +172,7 @@ mlx5_read_dev_counters(struct rte_eth_dev *dev, uint64_t *stats)
 	}
 	for (i = 0; i != xstats_n; ++i) {
 		if (mlx5_counters_init[i].ib) {
-			FILE *file;
-			MKSTR(path, "%s/ports/1/hw_counters/%s",
-			      priv->ibdev_path,
-			      mlx5_counters_init[i].ctr_name);
-
-			file = fopen(path, "rb");
-			if (file) {
-				int n = fscanf(file, "%" SCNu64, &stats[i]);
-
-				fclose(file);
-				if (n != 1)
-					stats[i] = 0;
-			}
+            mlx5_read_ib_stat(i, stats[i]);
 		} else {
 			stats[i] = (uint64_t)
 				et_stats->data[xstats_ctrl->dev_table_idx[i]];
@@ -389,6 +394,9 @@ mlx5_stats_get(struct rte_eth_dev *dev, struct rte_eth_stats *stats)
 #endif
 		tmp.oerrors += txq->stats.oerrors;
 	}
+
+    tmp.imissed = mlx5_read_ib_stat(17, stats[i]);
+
 #ifndef MLX5_PMD_SOFT_COUNTERS
 	/* FIXME: retrieve and add hardware counters. */
 #endif
